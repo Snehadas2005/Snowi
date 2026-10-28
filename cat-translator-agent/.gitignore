@@ -1,0 +1,5 @@
+.venv
+.venv_wsl
+__pycache__
+test_samples
+./venv_wsl
