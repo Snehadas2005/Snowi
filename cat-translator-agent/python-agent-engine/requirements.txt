@@ -1,20 +1,19 @@
-# DSP & Signal Processing
+# DSP & Signal Processing (all that Part 1 cleaning needs)
 librosa>=0.10.1
 numpy>=1.26.0
 scipy>=1.11.0
 noisereduce>=3.0.0
 soundfile>=0.12.1
+matplotlib>=3.8.0
 
-# AI Vocal Isolation & Neural Networks
-demucs>=4.0.1
-torch>=2.2.0
-torchaudio>=2.2.0
-
-# API & Web Framework
+# API
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
 
-# Visualization & Debugging
-matplotlib>=3.8.0
+# Neural stage (install when you add the meow detector / classifier)
+# torch>=2.2.0
+# torchaudio>=2.2.0
+# demucs was removed: it separates human-music stems (vocals/drums/bass/other),
+# not cat sounds, and adds ~2 GB to the image.

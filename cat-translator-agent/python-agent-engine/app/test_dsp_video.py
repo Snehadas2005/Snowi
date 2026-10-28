@@ -1,79 +1,56 @@
-"""
-# changes directly will go to the next step
-from app.audio_dsp import AudioProcessor
+import time
+from pathlib import Path
 
-processor = AudioProcessor()
-
-# Works seamlessly across formats
-video_file = "../test_samples/blind_cat_video.mp4"
-audio_file = "test_samples/kitten_meowing_audio.mp3"
-
-for media_path in [video_file, audio_file]:
-    try:
-        res = processor.process_file_to_tensor_input(media_path)
-        print(f"File processed successfully: {media_path}")
-        print(f"Output shape: {res['spectrogram'].shape}\n")
-    except Exception as e:
-        print(f"Failed processing {media_path}: {e}")
-"""
-"""
-# changes seen in form of graph
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import librosa
+import numpy as np
+
 from app.audio_dsp import AudioProcessor
 
-processor = AudioProcessor()
+FILES = ["blind_cat_video.mp4", "kitten_meowing_audio.mp3"]
 
-# Media files
-media_files = {
-    "video": "../test_samples/blind_cat_video.mp4",
-    "audio": "../test_samples/kitten_meowing_audio.mp3"
-}
 
-for media_type, file_path in media_files.items():
-    try:
-        res = processor.process_file_to_tensor_input(file_path)
-        spec = res["spectrogram"][0]  # Shape: (128, 130)
+def find_samples_dir() -> Path:
+    """Walk upward from this file until a folder named test_samples holds our files."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        cand = parent / "test_samples"
+        if all((cand / f).is_file() for f in FILES):
+            return cand
+    raise FileNotFoundError(
+        f"Could not find a 'test_samples' folder containing {FILES} "
+        f"anywhere above {here}"
+    )
 
-        # Create plot
-        plt.figure(figsize=(10, 4))
-        plt.imshow(spec, origin="lower", aspect="auto", cmap="viridis")
-        plt.colorbar(format="%+2.0f dB")
-        plt.title(f"Cleaned Mel-Spectrogram ({media_type.capitalize()} Source)")
-        plt.xlabel("Time Frames")
-        plt.ylabel("Mel Frequency Bins")
-        plt.tight_layout()
 
-        # Save distinct PNG file for each format
-        output_image = f"../test_samples/spectrogram_{media_type}.png"
-        plt.savefig(output_image)
-        plt.close()  # Clear memory
-        
-        print(f"Processed {media_type} successfully -> Saved plot: {output_image}")
+SAMPLES = find_samples_dir()
+OUT = SAMPLES / "out"
+print("Using samples from:", SAMPLES)
 
-    except Exception as e:
-        print(f"Failed processing {media_type} ({file_path}): {e}")
-"""
+proc = AudioProcessor()
 
-# changes seen in form of audio or video file
-from app.audio_dsp import AudioProcessor
+for name in FILES:
+    src = SAMPLES / name
+    t0 = time.time()
+    res = proc.save_cleaned_media(src, OUT)
+    dt = time.time() - t0
+    print(f"\n{name}\n  -> {res['output']}   ({dt:.2f}s)")
+    print("  meow events (s):", [(round(e.start, 2), round(e.end, 2)) for e in res["events"]])
 
-processor = AudioProcessor()
+    tens = proc.process_file_to_tensor_input(src)
+    print("  model input:", tens["spectrograms"].shape, "(n_meows, 1, mels, frames)")
 
-media_files = [
-    ("../test_samples/blind_cat_video.mp4", "../test_samples/cleaned_from_video.wav"),
-    ("../test_samples/kitten_meowing_audio.mp3", "../test_samples/cleaned_from_audio.wav"),
-]
-
-for src_file, out_wav in media_files:
-    try:
-        # 1. Inspect PyTorch-ready tensor data
-        res = processor.process_file_to_tensor_input(src_file)
-        print(f"File processed for model: {src_file}")
-        print(f"Tensor Shape ready for PyTorch CNN: {res['spectrogram'].shape}")
-
-        # 2. Save the cleaned audio file to disk
-        saved_file = processor.save_cleaned_audio(src_file, out_wav)
-        print(f"Listen to cleaned audio at: {saved_file}\n")
-
-    except Exception as e:
-        print(f"Failed processing {src_file}: {e}\n")
+    y = proc.load_audio(src)
+    clean, _ = proc.clean_waveform(y)
+    fig, ax = plt.subplots(2, 1, figsize=(11, 6))
+    ref = np.abs(librosa.stft(y, n_fft=2048, hop_length=256)).max()
+    for a, x, title in zip(ax, [y, clean], ["before", "after"]):
+        S = librosa.amplitude_to_db(np.abs(librosa.stft(x, n_fft=2048, hop_length=256)), ref=ref)
+        librosa.display.specshow(S, sr=proc.sr, hop_length=256, x_axis="time",
+                                 y_axis="log", ax=a, fmax=10000, vmin=-80, vmax=0)
+        a.set_title(title)
+    plt.tight_layout()
+    plt.savefig(OUT / f"compare_{Path(name).stem}.png", dpi=90)
+    plt.close()
