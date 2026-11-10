@@ -240,6 +240,14 @@ class AudioProcessor:
             "sample_rate": self.sr,
         }
 
+    def extract_meow_waveforms(self, file_path: str | Path):
+        """Cleaned waveform of each detected meow (for embedding-based classifiers).
+        Returns (list_of_1d_arrays, list_of_MeowEvent)."""
+        y = self.load_audio(file_path)
+        clean, events = self.clean_waveform(y)
+        waves = [clean[int(e.start * self.sr): int(e.end * self.sr)] for e in events]
+        return waves, events
+
     # ------------------------------------------------------------- output
     def save_cleaned_media(self, src: str | Path, out_dir: str | Path,
                            stem: Optional[str] = None) -> dict:

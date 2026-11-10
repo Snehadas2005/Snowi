@@ -12,8 +12,11 @@ uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
 
-# Neural stage (install when you add the meow detector / classifier)
-# torch>=2.2.0
-# torchaudio>=2.2.0
-# demucs was removed: it separates human-music stems (vocals/drums/bass/other),
-# not cat sounds, and adds ~2 GB to the image.
+# Neural stage (intent classifier)
+torch>=2.2.0
+torchvision>=0.17.0
+
+# Evaluation + embedding baseline
+scikit-learn>=1.3
+joblib>=1.3
+transformers>=4.40   # pretrained AST (downloads ~350 MB once)
