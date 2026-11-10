@@ -48,17 +48,21 @@ INTENT_TEXT = {
     "waiting_for_food": "I'm waiting for my food.",
 }
 
+HEDGE_EN = "Probably: "
+
 
 @dataclass
 class IntentPrediction:
-    status: str                         # "ok" | "uncertain" | "untrained" | "no_meow"
-    label: Optional[str] = None         # only set when status == "ok"
+    status: str                         # "ok" | "leaning" | "uncertain" | "untrained" | "no_meow"
+    label: Optional[str] = None         # set when status is "ok" or "leaning"
     text: Optional[str] = None
     confidence: float = 0.0             # calibrated probability of `label`
     probabilities: dict = field(default_factory=dict)   # clip-level
     per_meow: list = field(default_factory=list)        # [{"label","confidence"}, ...]
     n_meows: int = 0
     message: str = ""
+    vote_share: float = 0.0             # confidence-weighted share of meows agreeing with `label`
+    runner_up: Optional[str] = None     # second-most-likely label (always reported)
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
@@ -78,6 +82,8 @@ def decide(
     labels: Sequence[str],
     min_confidence: float = 0.55,
     min_margin: float = 0.15,
+    leaning_margin: float = 0.06,
+    leaning_votes: float = 0.55,
 ) -> IntentPrediction:
     """probs_per_meow: (n_meows, n_classes) -> clip-level IntentPrediction."""
     probs_per_meow = np.atleast_2d(probs_per_meow)
@@ -85,26 +91,49 @@ def decide(
     if n == 0:
         return IntentPrediction(status="no_meow", message="No meow detected in this clip.")
 
-    clip_probs = probs_per_meow.mean(axis=0)
+    # Weight each meow by how decisive it is (top1 - top2), so one sharp meow
+    # counts more than several near-flat ones.  Equal predictions -> plain mean.
+    srt = np.sort(probs_per_meow, axis=1)
+    w = np.clip(srt[:, -1] - srt[:, -2], 0.05, None) if probs_per_meow.shape[1] > 1 \
+        else np.ones(n)
+    clip_probs = (probs_per_meow * w[:, None]).sum(axis=0) / w.sum()
     order = np.argsort(clip_probs)[::-1]
     top, second = clip_probs[order[0]], clip_probs[order[1]] if len(order) > 1 else 0.0
+    best = int(order[0])
     per_meow = [
         {"label": labels[int(p.argmax())], "confidence": round(float(p.max()), 4)}
         for p in probs_per_meow
     ]
     table = {lab: round(float(p), 4) for lab, p in zip(labels, clip_probs)}
 
-    if top < min_confidence or (top - second) < min_margin:
+    # Second, independent signal: confidence-weighted vote share of per-meow winners.
+    votes = np.zeros(len(labels))
+    np.add.at(votes, probs_per_meow.argmax(axis=1), probs_per_meow.max(axis=1))
+    vote_share = float(votes[best] / votes.sum())
+    runner = labels[int(order[1])] if len(order) > 1 else None
+    common = dict(confidence=round(float(top), 4), probabilities=table, per_meow=per_meow,
+                  n_meows=n, vote_share=round(vote_share, 3), runner_up=runner)
+
+    if top >= min_confidence and (top - second) >= min_margin:
+        lab = labels[best]
+        return IntentPrediction(status="ok", label=lab, text=INTENT_TEXT.get(lab, lab), **common)
+
+    # Best guess is not decisive, but if the meows mostly agree with it, say so
+    # (hedged) instead of throwing the information away.  Needs a real lead AND
+    # majority agreement, so near-flat outputs stay "uncertain".
+    if (top - second) >= leaning_margin and vote_share >= leaning_votes \
+            and best == int(votes.argmax()):
+        lab = labels[best]
         return IntentPrediction(
-            status="uncertain", confidence=round(float(top), 4), probabilities=table,
-            per_meow=per_meow, n_meows=n,
-            message=f"Not sure: best guess '{labels[int(order[0])]}' at {top:.0%} "
-                    f"is too close to the alternatives.")
-    lab = labels[int(order[0])]
+            status="leaning", label=lab,
+            text=HEDGE_EN + INTENT_TEXT.get(lab, lab),
+            message=f"Leaning '{lab}' ({vote_share:.0%} of meows agree), "
+                    f"but '{runner}' is a plausible alternative.", **common)
+
     return IntentPrediction(
-        status="ok", label=lab, text=INTENT_TEXT.get(lab, lab),
-        confidence=round(float(top), 4), probabilities=table,
-        per_meow=per_meow, n_meows=n)
+        status="uncertain",
+        message=f"Not sure: best guess '{labels[best]}' at {top:.0%} "
+                f"is too close to the alternatives.", **common)
 
 
 def fit_temperature(logits: np.ndarray, y: np.ndarray, grid=np.linspace(0.3, 10.0, 195)) -> float:

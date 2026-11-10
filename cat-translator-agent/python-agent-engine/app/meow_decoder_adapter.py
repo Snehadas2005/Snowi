@@ -28,7 +28,7 @@ import librosa
 import numpy as np
 
 from app.audio_dsp import AudioProcessor
-from app.cnn_classifier import IntentPrediction, decide
+from app.cnn_classifier import HEDGE_EN, IntentPrediction, decide
 
 logger = logging.getLogger(__name__)
 SR16 = 16000
@@ -113,8 +113,9 @@ class MeowDecoderAnalyzer:
 
         if probs:
             pred = decide(np.array(probs), labels, self.min_confidence, self.min_margin)
-            if pred.label:
-                pred.text = lines.get(pred.label, pred.label)
+            if pred.label:  # use the decoder's own wording, hedged when only "leaning"
+                base = lines.get(pred.label, pred.label)
+                pred.text = (HEDGE_EN + base) if pred.status == "leaning" else base
         else:
             pred = IntentPrediction(
                 status="no_meow", message="No confirmed meow in this clip."
